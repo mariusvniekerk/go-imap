@@ -438,6 +438,7 @@ func (c *Client) beginCommand(name string, cmd command) *commandEncoder {
 
 	c.pendingCmds = append(c.pendingCmds, cmd)
 	quotedUTF8 := c.caps.Has(imap.CapIMAP4rev2) || c.enabled.Has(imap.CapUTF8Accept)
+	mailboxUTF8 := c.mailboxUTF8()
 	literalMinus := c.caps.Has(imap.CapLiteralMinus)
 	literalPlus := c.caps.Has(imap.CapLiteralPlus)
 
@@ -447,6 +448,7 @@ func (c *Client) beginCommand(name string, cmd command) *commandEncoder {
 
 	wireEnc := imapwire.NewEncoder(c.bw, imapwire.ConnSideClient)
 	wireEnc.QuotedUTF8 = quotedUTF8
+	wireEnc.MailboxUTF8 = mailboxUTF8
 	wireEnc.LiteralMinus = literalMinus
 	wireEnc.LiteralPlus = literalPlus
 	wireEnc.NewContinuationRequest = func() *imapwire.ContinuationRequest {
@@ -460,6 +462,11 @@ func (c *Client) beginCommand(name string, cmd command) *commandEncoder {
 	}
 	enc.Atom(tag).SP().Atom(name)
 	return enc
+}
+
+func (c *Client) mailboxUTF8() bool {
+	return c.enabled.Has(imap.CapIMAP4rev2) || c.enabled.Has(imap.CapUTF8Accept) ||
+		(c.caps.Has(imap.CapIMAP4rev2) && !c.caps.Has(imap.CapIMAP4rev1))
 }
 
 func (c *Client) deletePendingCmdByTag(tag string) command {
@@ -628,6 +635,10 @@ func (c *Client) read() {
 func (c *Client) readResponse() error {
 	c.setReadTimeout(respReadTimeout)
 	defer c.setReadTimeout(idleReadTimeout)
+
+	c.mutex.Lock()
+	c.dec.MailboxUTF8 = c.mailboxUTF8()
+	c.mutex.Unlock()
 
 	if c.dec.Special('+') {
 		if err := c.readContinueReq(); err != nil {

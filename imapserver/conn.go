@@ -178,6 +178,9 @@ func (c *Conn) serve() {
 		dec := imapwire.NewDecoder(c.br, imapwire.ConnSideServer)
 		dec.MaxSize = maxCommandSize
 		dec.CheckBufferedLiteralFunc = c.checkBufferedLiteral
+		c.mutex.Lock()
+		dec.MailboxUTF8 = c.mailboxUTF8()
+		c.mutex.Unlock()
 
 		if c.state == imap.ConnStateLogout || dec.EOF() {
 			break
@@ -427,6 +430,11 @@ func (c *Conn) canAuth() bool {
 	return isTLS || c.server.options.InsecureAuth
 }
 
+func (c *Conn) mailboxUTF8() bool {
+	return c.enabled.Has(imap.CapIMAP4rev2) || c.enabled.Has(imap.CapUTF8Accept) ||
+		!c.server.options.caps().Has(imap.CapIMAP4rev1)
+}
+
 func (c *Conn) writeStatusResp(tag string, statusResp *imap.StatusResponse) error {
 	enc := newResponseEncoder(c)
 	defer enc.end()
@@ -497,10 +505,12 @@ type responseEncoder struct {
 func newResponseEncoder(conn *Conn) *responseEncoder {
 	conn.mutex.Lock()
 	quotedUTF8 := conn.enabled.Has(imap.CapIMAP4rev2) || conn.enabled.Has(imap.CapUTF8Accept)
+	mailboxUTF8 := conn.mailboxUTF8()
 	conn.mutex.Unlock()
 
 	wireEnc := imapwire.NewEncoder(conn.bw, imapwire.ConnSideServer)
 	wireEnc.QuotedUTF8 = quotedUTF8
+	wireEnc.MailboxUTF8 = mailboxUTF8
 
 	conn.encMutex.Lock() // released by responseEncoder.end
 	conn.setWriteTimeout(respWriteTimeout)
